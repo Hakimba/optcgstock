@@ -1,0 +1,52 @@
+name: Moniteur ShopTjeux
+
+# Déclenchement : toutes les 5 minutes (cron en UTC) + bouton manuel "Run".
+# NB : 5 min est l'intervalle minimum autorisé par GitHub, et les horaires
+# peuvent être légèrement retardés quand l'infra GitHub est chargée.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+# Autorise le job à réécrire state.json dans le dépôt (persistance de l'état).
+permissions:
+  contents: write
+
+# Empêche deux exécutions de se chevaucher.
+concurrency:
+  group: moniteur-shoptjeux
+  cancel-in-progress: false
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Vérifier stock / nouveaux produits
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py --once
+
+      - name: Sauvegarder l'état si changé
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "maj état moniteur [skip ci]"
+            git push
+            echo "État mis à jour et sauvegardé."
+          else
+            echo "Aucun changement d'état à sauvegarder."
+          fi

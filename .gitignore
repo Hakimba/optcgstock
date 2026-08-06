@@ -1,0 +1,8 @@
+# On NE versionne PAS ces fichiers :
+__pycache__/
+*.pyc
+monitor.log
+
+# NB : state.json EST volontairement suivi par git — c'est lui qui mémorise
+# l'état d'un passage à l'autre entre deux exécutions GitHub Actions.
+# Ne l'ajoute donc PAS ici.
