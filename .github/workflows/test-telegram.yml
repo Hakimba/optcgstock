@@ -1,0 +1,73 @@
+name: Test Telegram
+
+# Uniquement manuel : à lancer depuis l'onglet Actions avec "Run workflow".
+# Vérifie que les Secrets TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID sont corrects,
+# indépendamment de l'état du site (le mode --test envoie le message Telegram
+# AVANT d'interroger shoptjeux.com).
+on:
+  workflow_dispatch: {}
+
+# Lecture seule : ce workflow ne réécrit jamais state.json.
+permissions:
+  contents: read
+
+jobs:
+  test-telegram:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Vérifier que les secrets sont bien renseignés
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          erreur=0
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::Le secret TELEGRAM_BOT_TOKEN est absent ou vide."
+            erreur=1
+          elif ! printf '%s' "$TELEGRAM_BOT_TOKEN" | grep -qE '^[0-9]{6,}:[A-Za-z0-9_-]{30,}$'; then
+            echo "::error::TELEGRAM_BOT_TOKEN ne ressemble pas à un token (attendu : 123456789:AA...). Espace en trop ou valeur tronquée ?"
+            erreur=1
+          fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::Le secret TELEGRAM_CHAT_ID est absent ou vide."
+            erreur=1
+          elif ! printf '%s' "$TELEGRAM_CHAT_ID" | grep -qE '^-?[0-9]+$'; then
+            echo "::error::TELEGRAM_CHAT_ID doit être un nombre entier (ex. 123456789 ou -1001234567890)."
+            erreur=1
+          fi
+          [ "$erreur" -eq 0 ] && echo "Format des deux secrets : OK."
+          exit $erreur
+
+      - name: Envoyer le message de test
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # --test envoie d'abord le message Telegram, puis tente de lire le
+          # site. On capture la sortie pour décider nous-mêmes du verdict :
+          # monitor.py se termine toujours en code 0, y compris en cas d'échec.
+          python monitor.py --test 2>&1 | tee sortie.txt
+
+          if grep -q "Message de test Telegram : OK" sortie.txt; then
+            echo "::notice::Telegram fonctionne — tu devrais avoir reçu le message."
+          else
+            echo "::error::L'envoi Telegram a échoué. Vérifie la valeur des secrets, et que tu as déjà écrit au moins une fois à ton bot."
+            exit 1
+          fi
+
+          # Le site injoignable n'est PAS un échec de ce test : on le signale
+          # seulement, puisque le but ici est de valider la chaîne Telegram.
+          if grep -q "Site injoignable" sortie.txt; then
+            echo "::warning::Telegram est OK, mais shoptjeux.com ne répond pas pour le moment (504 / surcharge). C'est indépendant du bot."
+          fi
