@@ -404,6 +404,9 @@ def main():
                         help="Un seul passage + message Telegram de test, puis stop")
     parser.add_argument("--once", action="store_true",
                         help="Un seul passage réel puis stop (pour cron)")
+    parser.add_argument("--heartbeat", action="store_true",
+                        help="Envoie un récapitulatif Telegram depuis l'état "
+                             "enregistré, sans interroger le site")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -430,6 +433,34 @@ def main():
             save_state(state)
         log("=== Fin du test (l'état n'a pas été modifié) ===")
         return
+
+    if args.heartbeat:
+        # Signe de vie périodique : on lit UNIQUEMENT l'état déjà enregistré,
+        # sans toucher au site ni modifier state.json. L'absence de ce message
+        # est en soi le signal qu'il y a un problème.
+        log("=== BATTEMENT DE CŒUR ===")
+        state = load_state()
+        total = len(state)
+        en_stock = sum(1 for v in state.values() if v.get("in_stock"))
+        # Date fournie par le workflow (dernier commit touchant state.json) :
+        # la date de fichier serait celle du checkout, donc inutilisable.
+        maj = os.environ.get("ETAT_MAJ_LE", "").strip()
+
+        if total == 0:
+            msg = ("🟡 Moniteur ShopTjeux : aucun état de référence.\n"
+                   "Le moniteur n'a encore jamais réussi à lire le site. "
+                   "Aucune alerte ne peut partir tant que ce n'est pas résolu.")
+        else:
+            msg = (f"💓 Moniteur ShopTjeux OK\n"
+                   f"{total} produit(s) suivi(s), dont {en_stock} en stock.")
+            if maj:
+                msg += f"\nDernière mise à jour de l'état : {maj}"
+
+        ok = send_telegram(cfg, msg)
+        log(f"Battement de cœur : {'envoyé' if ok else 'ÉCHEC envoi'}")
+        # Sortie non nulle si l'envoi rate : le run passe en rouge et GitHub
+        # t'envoie un e-mail — seul moyen d'être prévenu quand Telegram casse.
+        sys.exit(0 if ok else 1)
 
     log("=== Démarrage du moniteur ShopTjeux ===")
     log(f"Intervalle : {interval} s ({interval // 60} min). Ctrl+C pour arrêter.")

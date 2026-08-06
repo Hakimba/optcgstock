@@ -1,0 +1,59 @@
+name: Battement de cœur
+
+# Signe de vie toutes les 5 heures (UTC) + bouton manuel.
+# NB : "0 */5 * * *" déclenche à 00h, 05h, 10h, 15h et 20h UTC ; le compteur
+# repart à minuit, l'écart 20h->00h est donc de 4h et non de 5h.
+# Si tu ne reçois plus ce message, c'est que quelque chose ne va pas.
+on:
+  schedule:
+    - cron: "0 */5 * * *"
+  workflow_dispatch: {}
+
+# Lecture seule : ce workflow ne modifie jamais state.json.
+permissions:
+  contents: read
+
+concurrency:
+  group: battement-shoptjeux
+  cancel-in-progress: false
+
+jobs:
+  battement:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+        with:
+          # Historique complet : nécessaire pour dater le dernier commit
+          # touchant state.json (voir l'étape suivante).
+          fetch-depth: 0
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Dater la dernière mise à jour de l'état
+        id: etat
+        run: |
+          # La date de modification du fichier serait celle du checkout ; on
+          # prend donc la date du dernier commit ayant touché state.json.
+          if [ -f state.json ]; then
+            d=$(git log -1 --format=%cd --date=format:'%d/%m/%Y à %Hh%M UTC' -- state.json)
+          else
+            d=""
+          fi
+          echo "date=$d" >> "$GITHUB_OUTPUT"
+          echo "Dernière mise à jour de l'état : ${d:-jamais}"
+
+      - name: Envoyer le battement de cœur
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ETAT_MAJ_LE: ${{ steps.etat.outputs.date }}
+        # monitor.py --heartbeat sort en code 1 si l'envoi Telegram échoue :
+        # le run passe alors en rouge et GitHub prévient par e-mail.
+        run: python monitor.py --heartbeat
