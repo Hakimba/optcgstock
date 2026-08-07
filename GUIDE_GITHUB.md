@@ -105,6 +105,40 @@ stock. Tu peux fermer ton PC, tout tourne côté GitHub.
   GitHub (crayon ✏️ → Commit). Pas besoin de toucher au reste.
 - **Arrêter** : onglet Actions → le workflow → « … » → **Disable workflow**.
 
+## Ajouter une boutique à surveiller
+
+Tout se passe dans `config.ini`, sans toucher au code. Une « source » = une
+boutique + **une** collection. Le moniteur y détecte à la fois les nouveaux
+produits et les retours en stock.
+
+Pour une boutique **Shopify** (ses URLs contiennent `/collections/` et
+`/products/`), copie ce bloc à la fin du fichier :
+
+```ini
+[source:mon-nom-court]
+platform   = shopify
+base_url   = https://laboutique.com
+collection = le-handle-de-la-collection
+label      = Nom affiché dans les alertes
+```
+
+Le `collection` est le morceau d'URL juste après `/collections/`. Si le site
+est servi sous un préfixe de langue (ex. `.../en/collections/...`), mets ce
+préfixe dans `base_url` : `https://laboutique.com/en`.
+
+Deux points utiles :
+
+- Pour vérifier qu'une boutique est bien du Shopify, ouvre
+  `https://laboutique.com/collections/<handle>/products.json` dans ton
+  navigateur : tu dois voir du JSON.
+- Une collection ne contient parfois qu'une partie du catalogue. Vérifie le
+  nombre de produits avant de te fier à une seule collection — sur CardLab,
+  la collection `one-piece` n'en contient qu'un seul, d'où les cinq sources.
+
+Pour désactiver une source sans la supprimer : `enabled = false`.
+La première exécution d'une nouvelle source sert de référence et n'envoie
+aucune alerte — tu ne seras donc pas noyé sous les notifications.
+
 ## Sécurité
 
 Ne mets **jamais** ton token Telegram dans `config.ini` ou dans le code sur un
