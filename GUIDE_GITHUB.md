@@ -135,13 +135,24 @@ POST avec des en-têtes) :
 
 - **URL** :
   `https://api.github.com/repos/<TON_PSEUDO>/optcgstock/actions/workflows/monitor.yml/dispatches`
-- **Méthode** : `POST`
-- **En-têtes** :
-  - `Authorization: Bearer <TON_JETON>`
-  - `Accept: application/vnd.github+json`
-  - `X-GitHub-Api-Version: 2022-11-28`
-- **Corps** : `{"ref":"master"}`
+- **Méthode** : `POST` (le défaut est `GET`, pense à changer)
+- **Corps de la requête** : `{"ref":"master"}` — accolades et guillemets compris
 - **Planification** : toutes les 5 minutes.
+
+Les en-têtes se saisissent en deux champs séparés, **clé** et **valeur** : ce
+qui est avant les deux-points va dans la clé, ce qui est après dans la valeur.
+Trois lignes à ajouter :
+
+| Clé | Valeur |
+|---|---|
+| `Authorization` | `Bearer <TON_JETON>` |
+| `Accept` | `application/vnd.github+json` |
+| `X-GitHub-Api-Version` | `2022-11-28` |
+
+Pièges classiques : pas de deux-points dans la clé (`Authorization`, pas
+`Authorization:`) ; le mot `Bearer` fait partie de la valeur, avec une seule
+espace avant le jeton ; pas de guillemets autour des valeurs ; et gare aux
+espaces parasites collés par le copier-coller.
 
 GitHub répond **`204 No Content`** quand c'est bon. Le corps de la réponse est
 vide : c'est normal, ce n'est pas une erreur.
