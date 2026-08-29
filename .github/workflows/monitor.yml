@@ -40,13 +40,35 @@ jobs:
 
       - name: Sauvegarder l'état si changé
         run: |
-          if [ -n "$(git status --porcelain state.json)" ]; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "maj état moniteur [skip ci]"
-            git push
-            echo "État mis à jour et sauvegardé."
-          else
+          if [ -z "$(git status --porcelain state.json)" ]; then
             echo "Aucun changement d'état à sauvegarder."
+            exit 0
           fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # L'état qu'on vient de calculer fait autorité : il sort d'une lecture
+          # fraîche de TOUTES les boutiques. Si master a bougé entre-temps, on le
+          # réapplique tel quel sur le master à jour plutôt que de fusionner.
+          cp state.json "$RUNNER_TEMP/etat-nouveau.json"
+
+          for essai in 1 2 3; do
+            git add state.json
+            git commit -q -m "maj état moniteur [skip ci]" || true
+            if git push -q; then
+              echo "État mis à jour et sauvegardé."
+              exit 0
+            fi
+            echo "Push refusé (master a bougé), nouvelle tentative $essai/3…"
+            git fetch -q origin master
+            git reset -q --hard origin/master
+            cp "$RUNNER_TEMP/etat-nouveau.json" state.json
+            if [ -z "$(git status --porcelain state.json)" ]; then
+              echo "Un autre passage a déjà enregistré le même état."
+              exit 0
+            fi
+          done
+
+          echo "::error::Sauvegarde de l'état impossible après 3 tentatives."
+          exit 1
