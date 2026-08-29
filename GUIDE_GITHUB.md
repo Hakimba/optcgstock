@@ -89,10 +89,11 @@ stock. Tu peux fermer ton PC, tout tourne côté GitHub.
 
 ## Bon à savoir
 
-- **Ponctualité** : les crons GitHub visent 5 min mais peuvent être retardés
-  de quelques minutes en cas de forte charge (surtout en haut de l'heure), et
-  très rarement un passage est sauté. Sans importance pour surveiller une
-  boutique.
+- **Ponctualité** : le cron du workflow est réglé sur 5 min, mais **GitHub ne
+  tient pas cette cadence**. En pratique, sur ce dépôt, les passages planifiés
+  tombent toutes les **3 à 13 heures** : GitHub bride fortement les `schedule`,
+  et les crons les plus fréquents sont les premiers sacrifiés. Pour une vraie
+  cadence de 5 minutes, voir « Cadence fiable » ci-dessous.
 - **Suivre l'activité** : onglet **Actions** → tu vois chaque exécution (verte
   = OK). Clique dedans pour lire les logs (nombre de produits vus, etc.).
 - **Voir l'état mémorisé** : le fichier `state.json` apparaît dans ton dépôt
@@ -104,6 +105,68 @@ stock. Tu peux fermer ton PC, tout tourne côté GitHub.
 - **Changer de catégorie / de réglages** : édite `config.ini` directement sur
   GitHub (crayon ✏️ → Commit). Pas besoin de toucher au reste.
 - **Arrêter** : onglet Actions → le workflow → « … » → **Disable workflow**.
+
+## Cadence fiable : déclencher le moniteur depuis un cron externe
+
+Le `schedule` de GitHub étant bridé (voir « Ponctualité »), le moyen d'obtenir
+un passage réellement toutes les 5 minutes est de faire appeler par un service
+de cron gratuit l'API **`workflow_dispatch`** de GitHub — celle-ci n'est pas
+bridée. Le workflow accepte déjà ce déclenchement, il n'y a rien à modifier
+dans le dépôt.
+
+Le `schedule` reste en place : il ne coûte rien et sert de filet si le service
+externe tombe.
+
+### 1. Créer un jeton d'accès GitHub
+
+1. <https://github.com/settings/personal-access-tokens/new> (jeton **fine-grained**).
+2. **Repository access** → *Only select repositories* → `optcgstock`.
+3. **Permissions** → *Repository permissions* → **Actions** → **Read and write**.
+   C'est la seule permission nécessaire : ce jeton ne peut rien faire d'autre
+   que lancer des workflows sur ce dépôt.
+4. **Expiration** : au-delà de la date choisie le cron cessera de fonctionner
+   en silence. Prends une échéance longue et note-la quelque part.
+5. Génère, puis **copie le jeton** (il n'est affiché qu'une fois).
+
+### 2. Créer la tâche planifiée
+
+Sur <https://cron-job.org> (gratuit, ou tout équivalent qui sait envoyer un
+POST avec des en-têtes) :
+
+- **URL** :
+  `https://api.github.com/repos/<TON_PSEUDO>/optcgstock/actions/workflows/monitor.yml/dispatches`
+- **Méthode** : `POST`
+- **En-têtes** :
+  - `Authorization: Bearer <TON_JETON>`
+  - `Accept: application/vnd.github+json`
+  - `X-GitHub-Api-Version: 2022-11-28`
+- **Corps** : `{"ref":"master"}`
+- **Planification** : toutes les 5 minutes.
+
+GitHub répond **`204 No Content`** quand c'est bon. Le corps de la réponse est
+vide : c'est normal, ce n'est pas une erreur.
+
+### 3. Vérifier
+
+Onglet **Actions** : au bout de quelques minutes tu dois voir des exécutions
+« Moniteur One Piece » déclenchées par `workflow_dispatch`, espacées de 5 min.
+
+### En cas de souci
+
+| Réponse | Cause probable |
+|---|---|
+| `401 Bad credentials` | Jeton faux, expiré, ou `Bearer ` oublié devant. |
+| `403` | Permission **Actions: Read and write** absente du jeton, ou dépôt non coché. |
+| `404` | Pseudo/nom de dépôt erroné, ou jeton sans accès à ce dépôt. |
+| `422` | La branche indiquée dans `{"ref":"..."}` n'existe pas. |
+
+**Quota** : l'API GitHub autorise 5 000 appels/heure par jeton ; 12 par heure
+ne pose aucun problème. Le dépôt étant public, les minutes GitHub Actions sont
+gratuites et illimitées — 288 passages par jour ne coûtent rien.
+
+**Sécurité** : ce jeton donne le droit de lancer des workflows sur ce dépôt.
+Ne le publie nulle part. S'il fuite, révoque-le depuis la page des jetons : le
+cron externe cessera simplement de déclencher, rien d'autre n'est exposé.
 
 ## Ajouter une boutique à surveiller
 
