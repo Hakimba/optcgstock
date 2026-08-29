@@ -2,8 +2,8 @@ name: Test Telegram
 
 # Uniquement manuel : à lancer depuis l'onglet Actions avec "Run workflow".
 # Vérifie que les Secrets TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID sont corrects,
-# indépendamment de l'état du site (le mode --test envoie le message Telegram
-# AVANT d'interroger shoptjeux.com).
+# indépendamment de l'état des boutiques (le mode --test envoie le message
+# Telegram AVANT d'interroger les boutiques).
 on:
   workflow_dispatch: {}
 
@@ -68,6 +68,7 @@ jobs:
 
           # Le site injoignable n'est PAS un échec de ce test : on le signale
           # seulement, puisque le but ici est de valider la chaîne Telegram.
-          if grep -q "Site injoignable" sortie.txt; then
-            echo "::warning::Telegram est OK, mais shoptjeux.com ne répond pas pour le moment (504 / surcharge). C'est indépendant du bot."
+          if grep -q "INJOIGNABLE" sortie.txt; then
+            echo "::warning::Telegram est OK, mais au moins une boutique ne répond pas pour le moment. C'est indépendant du bot :"
+            grep "INJOIGNABLE" sortie.txt
           fi

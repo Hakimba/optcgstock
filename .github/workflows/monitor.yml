@@ -1,4 +1,4 @@
-name: Moniteur ShopTjeux
+name: Moniteur One Piece
 
 # Déclenchement : toutes les 5 minutes (cron en UTC) + bouton manuel "Run".
 # NB : 5 min est l'intervalle minimum autorisé par GitHub, et les horaires
@@ -14,7 +14,7 @@ permissions:
 
 # Empêche deux exécutions de se chevaucher.
 concurrency:
-  group: moniteur-shoptjeux
+  group: moniteur-one-piece
   cancel-in-progress: false
 
 jobs:
