@@ -9,6 +9,7 @@ Ce que fait le script, à chaque passage (par défaut toutes les 5 minutes) :
      publique de la plateforme :
         - Shopify      -> /collections/<handle>/products.json
         - WooCommerce  -> /wp-json/wc/store/v1/products  (repli HTML possible)
+        - e-monsite    -> HTML de la page catégorie (pas d'API publique)
   2. Compare l'état actuel à celui du passage précédent (mémorisé sur disque).
   3. Envoie une notification Telegram quand :
         - un NOUVEAU produit apparaît dans la collection -> "Nouveau produit"
@@ -30,13 +31,16 @@ Usage :
 
 import argparse
 import configparser
+import copy
 import html
 import json
 import os
+import re
 import sys
 import time
 import traceback
 from datetime import datetime
+from urllib.parse import urljoin, urlparse
 
 try:
     import requests
@@ -134,8 +138,10 @@ def load_sources(cfg):
             "collection": get("collection"),          # Shopify
             "category_slug": get("category_slug"),    # WooCommerce
             "category_id": get("category_id"),        # WooCommerce
-            "page_url": get("page_url"),              # WooCommerce, repli HTML
+            "page_url": get("page_url"),              # WooCommerce (repli HTML)
+                                                      #   et e-monsite
             "method": get("method", "api").lower(),   # WooCommerce
+            "sitemap_url": get("sitemap_url"),        # e-monsite, optionnel
             "currency": get("currency", "€"),
         })
     return sources
@@ -403,11 +409,227 @@ def fetch_products_woo_html(src, session):
     return produits
 
 
+# ---------------------------------------------------------------------------
+#  Récupération des produits — e-monsite
+# ---------------------------------------------------------------------------
+#  e-monsite (mystic-ambre.fr) n'expose aucune API publique : on lit le HTML de
+#  la page catégorie. Bonne nouvelle : le thème rend chaque produit dans une
+#  carte qui porte déjà tout ce qu'il nous faut :
+#
+#     <div class="card eco-item" data-category="op-11"
+#          data-gtag-item-id="6a5b3292dd2296e5bcd07f63" data-stock="0">
+#       <span class="ribbon … product-label">20/11/2026</span>   <- date de sortie
+#       <p class="media-heading"><a href="…">Nom du produit</a></p>
+#       <span class="final-price price-ttc">142,00€ <span class="tax-label">TTC</span></span>
+#     </div>
+#
+#  - data-gtag-item-id : identifiant stable du produit (sert de clé d'état) ;
+#  - data-stock        : QUANTITÉ restante (0 = rupture, >0 = en stock) ;
+#  - la page catégorie agrège aussi les produits des sous-catégories
+#    (op-11, display-one-piece-fr, ld, playmat…), donc UNE requête suffit.
+#
+#  En complément, on peut balayer le sitemap : il liste les fiches produit du
+#  site, y compris une éventuelle nouveauté que le widget de la page catégorie
+#  n'afficherait pas encore. Pour ces fiches-là seulement, on ouvre la page
+#  produit et on lit le JSON-LD schema.org (name / price / availability).
+
+# Valeurs de schema.org "availability" considérées comme commandables.
+DISPO_COMMANDABLE = ("instock", "instoreonly", "onlineonly",
+                     "limitedavailability", "preorder", "presale", "backorder")
+DISPO_EPUISE = ("outofstock", "soldout", "discontinued")
+
+# Garde-fou : nombre maximum de fiches produit ouvertes par passage lors du
+# balayage du sitemap. Évite de marteler la boutique si le sitemap déraille.
+MAX_FICHES_SITEMAP = 25
+
+
+def _soup(texte):
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        raise RuntimeError("Plateforme e-monsite : pip install beautifulsoup4")
+    return BeautifulSoup(texte, "html.parser")
+
+
+def _texte_sans(el, selecteur):
+    """Texte d'un élément, en retirant d'abord les sous-éléments parasites."""
+    if el is None:
+        return ""
+    copie = copy.copy(el)
+    for parasite in copie.select(selecteur):
+        parasite.decompose()
+    return " ".join(copie.get_text(" ", strip=True).split())
+
+
+def normalize_emonsite_card(card, page_url):
+    """Convertit une carte <div class="eco-item"> en produit normalisé."""
+    lien = (card.select_one("p.media-heading a[href]")
+            or card.select_one("a.card-object[href]")
+            or card.select_one("a[href]"))
+    if lien is None:
+        return None
+    url = urljoin(page_url, lien["href"]).split("#")[0]
+
+    nom = lien.get_text(" ", strip=True)
+    if not nom:  # lien sur l'image : on retombe sur le titre de la carte
+        nom = _texte_sans(card.select_one("p.media-heading"), ".tax-label")
+    if not nom:
+        return None
+
+    # data-stock = quantité restante. Absent ou illisible -> stock inconnu :
+    # on préfère "épuisé" (aucune alerte parasite) plutôt que d'inventer.
+    brut = card.get("data-stock")
+    try:
+        in_stock = int(str(brut).strip()) > 0
+    except (TypeError, ValueError):
+        in_stock = False
+
+    ruban = card.select_one(".product-label, .ribbon")
+    return {
+        # L'id e-monsite est stable ; sans lui, le chemin d'URL fait l'affaire
+        # (il ne change pas tant que le produit n'est pas renommé).
+        "id": (card.get("data-gtag-item-id") or urlparse(url).path).strip(),
+        "name": html.unescape(nom),
+        "in_stock": in_stock,
+        "price": _texte_sans(card.select_one(".final-price, .price"), ".tax-label"),
+        "url": url,
+        "label": ruban.get_text(" ", strip=True) if ruban else "",
+    }
+
+
+def _iter_ld_json(soup):
+    """Parcourt tous les objets JSON-LD de la page (y compris les @graph)."""
+    for balise in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(balise.string or "")
+        except (TypeError, ValueError):
+            continue
+        pile = [data]
+        while pile:
+            noeud = pile.pop()
+            if isinstance(noeud, list):
+                pile.extend(noeud)
+            elif isinstance(noeud, dict):
+                pile.extend(noeud.get("@graph", []) or [])
+                yield noeud
+
+
+def fetch_product_emonsite(url, src, session):
+    """
+    Lit UNE fiche produit e-monsite. Sert uniquement aux produits repérés dans
+    le sitemap mais absents de la page catégorie. Renvoie None si la fiche est
+    illisible : mieux vaut ignorer un produit que d'inventer son stock.
+    """
+    soup = _soup(http_get(session, url).text)
+
+    for noeud in _iter_ld_json(soup):
+        if "Product" not in str(noeud.get("@type", "")):
+            continue
+        offre = noeud.get("offers") or {}
+        if isinstance(offre, list):
+            offre = offre[0] if offre else {}
+        dispo = str(offre.get("availability", "")).rsplit("/", 1)[-1].lower()
+        if dispo in DISPO_COMMANDABLE:
+            in_stock = True
+        elif dispo in DISPO_EPUISE:
+            in_stock = False
+        else:
+            continue  # availability absente ou inconnue : JSON-LD inexploitable
+        return {
+            "id": urlparse(url).path,
+            "name": html.unescape(str(noeud.get("name") or "").strip()),
+            "in_stock": in_stock,
+            "price": format_price(offre.get("price"), src["currency"]),
+            "url": url,
+            "label": "",
+        }
+
+    # Repli : le bloc « Disponibilité : … » affiché sur la fiche.
+    texte = _texte_sans(soup.select_one(".availability"), ".availibity-label")
+    if texte:
+        epuise = re.search(r"rupture|épuis|epuis|indisponib", texte, re.I)
+        titre = soup.select_one("h1")
+        return {
+            "id": urlparse(url).path,
+            "name": (titre.get_text(" ", strip=True) if titre
+                     else urlparse(url).path.rsplit("/", 1)[-1]),
+            "in_stock": not epuise,
+            "price": "",
+            "url": url,
+            "label": "",
+        }
+
+    log(f"  fiche produit illisible, ignorée : {url}")
+    return None
+
+
+def urls_produits_sitemap(src, session, prefixe):
+    """URLs de fiches produit (.html) du sitemap situées sous la catégorie."""
+    texte = http_get(session, src["sitemap_url"]).text
+    trouvees = []
+    for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", texte):
+        loc = html.unescape(loc)
+        chemin = urlparse(loc).path
+        if chemin.startswith(prefixe) and chemin.endswith(".html"):
+            trouvees.append(loc)
+    return trouvees
+
+
+def fetch_products_emonsite(src, session):
+    """
+    Un passage = 1 requête sur la page catégorie (+ le sitemap si configuré).
+    """
+    page_url = src["page_url"] or src["base_url"]
+    if not page_url:
+        raise ValueError(f"Source '{src['key']}' : 'page_url' manquant.")
+
+    soup = _soup(http_get(session, page_url).text)
+    cartes = soup.select("div.eco-item, .eco-items .card")
+    produits = []
+    vues = set()
+    for carte in cartes:
+        p = normalize_emonsite_card(carte, page_url)
+        if p and p["url"] not in vues:
+            vues.add(p["url"])
+            produits.append(p)
+
+    if not produits:
+        # Page servie mais vide de cartes : thème modifié, page d'erreur
+        # déguisée en 200… On lève, pour que l'état précédent soit conservé
+        # au lieu d'être écrasé par une liste vide (qui ferait réapparaître
+        # tous les produits comme "nouveaux" au passage suivant).
+        raise ValueError(f"Aucune carte produit trouvée sur {page_url} "
+                         f"(structure de la page modifiée ?)")
+
+    if src["sitemap_url"]:
+        prefixe = urlparse(page_url).path
+        try:
+            manquantes = [u for u in urls_produits_sitemap(src, session, prefixe)
+                          if u.split("#")[0] not in vues]
+        except Exception as e:
+            log(f"  sitemap illisible ({type(e).__name__}: {e}), on garde les "
+                f"{len(produits)} produits de la page catégorie.")
+            manquantes = []
+        if len(manquantes) > MAX_FICHES_SITEMAP:
+            log(f"  {len(manquantes)} fiches hors page catégorie : on se limite "
+                f"aux {MAX_FICHES_SITEMAP} premières.")
+            manquantes = manquantes[:MAX_FICHES_SITEMAP]
+        for url in manquantes:
+            log(f"  produit absent de la page catégorie, lecture de sa fiche : {url}")
+            fiche = fetch_product_emonsite(url, src, session)
+            if fiche:
+                produits.append(fiche)
+
+    return produits
+
+
 def fetch_products(src, session):
     """Aiguillage vers la bonne plateforme. Renvoie (produits, méthode)."""
     plateforme = src["platform"]
     if plateforme == "shopify":
         return fetch_products_shopify(src, session), "shopify"
+    if plateforme == "emonsite":
+        return fetch_products_emonsite(src, session), "html e-monsite"
     if plateforme == "woocommerce":
         if src["method"] == "html":
             return fetch_products_woo_html(src, session), "html"
@@ -417,7 +639,7 @@ def fetch_products(src, session):
             log(f"  API Store indisponible ({e}). Tentative de repli HTML…")
             return fetch_products_woo_html(src, session), "html"
     raise ValueError(f"Plateforme inconnue : '{plateforme}' "
-                     f"(attendu : shopify ou woocommerce)")
+                     f"(attendu : shopify, woocommerce ou emonsite)")
 
 
 # ---------------------------------------------------------------------------
@@ -427,12 +649,19 @@ def esc(s):
     return html.escape(str(s))
 
 
+def ligne_sortie(p):
+    """Ligne « Sortie : … » quand la boutique affiche une date prévisionnelle."""
+    etiquette = (p.get("label") or "").strip()
+    return f"Sortie : {esc(etiquette)}\n" if etiquette else ""
+
+
 def build_new_product_msg(p, src):
     stock = "✅ EN STOCK" if p["in_stock"] else "⛔ épuisé"
     price = f" — {esc(p['price'])}" if p["price"] else ""
     return (
         f"🆕 <b>Nouveau produit</b> — {esc(src['label'])}\n"
         f"<b>{esc(p['name'])}</b>{price}\n"
+        f"{ligne_sortie(p)}"
         f"Statut : {stock}\n"
         f"{esc(p['url'])}"
     )
@@ -443,6 +672,7 @@ def build_restock_msg(p, src):
     return (
         f"🔔 <b>Retour en stock</b> — {esc(src['label'])}\n"
         f"<b>{esc(p['name'])}</b>{price}\n"
+        f"{ligne_sortie(p)}"
         f"{esc(p['url'])}"
     )
 
@@ -479,6 +709,9 @@ def run_source(cfg, src, session, state, notify=True):
             "in_stock": p["in_stock"],
             "price": p["price"],
             "url": p["url"],
+            # Étiquette affichée par la boutique (date de sortie prévue chez
+            # Mystic-Ambre). Vide pour les sources qui n'en ont pas.
+            "label": p.get("label", ""),
         }
         prec = ancien.get(pid)
         if prec is None:

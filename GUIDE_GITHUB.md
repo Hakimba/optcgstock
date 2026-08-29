@@ -1,6 +1,6 @@
 # Faire tourner le moniteur 24/7 gratuitement avec GitHub Actions
 
-Ce guide met en ligne ton moniteur ShopTjeux pour qu'il tourne **tout seul,
+Ce guide met en ligne ton moniteur One Piece pour qu'il tourne **tout seul,
 toutes les ~5 minutes, sans que ton PC soit allumé** — gratuitement, grâce à
 GitHub Actions.
 
@@ -33,7 +33,7 @@ Va sur https://github.com et crée un compte gratuit.
 
 Clique sur **New repository** (bouton vert, ou https://github.com/new).
 
-- Donne-lui un nom, ex. `shoptjeux-monitor`.
+- Donne-lui un nom, ex. `optcg-monitor`.
 - **Choisis « Public »** — important : les dépôts **publics** ont des minutes
   GitHub Actions **illimitées et gratuites**. Un dépôt **privé** n'a que
   2000 min/mois gratuites, ce qui serait dépassé en quelques jours à raison
@@ -76,10 +76,10 @@ chiffrées et invisibles, même pour toi, une fois enregistrées.
 
 1. Va dans l'onglet **Actions** du dépôt. Si GitHub demande d'activer les
    workflows, accepte.
-2. Clique sur le workflow **« Moniteur ShopTjeux »** dans la liste de gauche.
+2. Clique sur le workflow **« Moniteur One Piece »** dans la liste de gauche.
 3. Clique **Run workflow → Run workflow** (déclenchement manuel).
 4. Au bout de ~30 s, tu devrais recevoir sur Telegram le message
-   « 🟢 Moniteur ShopTjeux démarré ». 🎉
+   « 🟢 Moniteur démarré ». 🎉
 
 À partir de là, c'est automatique : GitHub relance le script **toutes les
 ~5 minutes**, et tu reçois une alerte à chaque nouveau produit ou retour en
