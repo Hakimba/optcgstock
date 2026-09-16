@@ -20,6 +20,13 @@ concurrency:
 jobs:
   verifier:
     runs-on: ubuntu-latest
+    # Un passage dure 18 s en médiane, 31 s au 95e centile. Le 12/09/2026 l'un
+    # d'eux est resté bloqué 52 min (une boutique répondant au compte-gouttes
+    # maintient le read timeout de requests indéfiniment), monopolisant le
+    # groupe de concurrence : les 4 passages suivants ont été annulés, soit
+    # ~50 min sans surveillance. Ce plafond transforme ce cas en run rouge
+    # (donc un e-mail) au lieu d'un trou silencieux.
+    timeout-minutes: 8
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@v4

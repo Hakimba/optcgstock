@@ -8,6 +8,7 @@ Ce que fait le script, à chaque passage (par défaut toutes les 5 minutes) :
      + une collection/catégorie), récupère la liste des produits via l'API
      publique de la plateforme :
         - Shopify      -> /collections/<handle>/products.json
+                          (ou /products/<handle>.js pour un produit précis)
         - WooCommerce  -> /wp-json/wc/store/v1/products  (repli HTML possible)
         - e-monsite    -> HTML de la page catégorie (pas d'API publique)
   2. Compare l'état actuel à celui du passage précédent (mémorisé sur disque).
@@ -135,7 +136,11 @@ def load_sources(cfg):
             "label": get("label", key),
             "platform": get("platform", "shopify").lower(),
             "base_url": get("base_url").rstrip("/"),
-            "collection": get("collection"),          # Shopify
+            "collection": get("collection"),          # Shopify, collection
+            # Shopify, fiches produit isolées : handles séparés par des
+            # virgules ou des retours à la ligne.
+            "products": [h.strip() for h in re.split(r"[,\n]", get("products"))
+                         if h.strip()],
             "category_slug": get("category_slug"),    # WooCommerce
             "category_id": get("category_id"),        # WooCommerce
             "page_url": get("page_url"),              # WooCommerce (repli HTML)
@@ -265,14 +270,52 @@ def normalize_shopify_product(p, src):
     }
 
 
+def prix_centimes_en_decimal(brut):
+    """
+    L'endpoint fiche produit /products/<handle>.js exprime les prix en
+    CENTIMES (6990 = 69,90 €), là où /collections/<h>/products.json les donne
+    en décimal ("69.90"). On convertit pour que normalize_shopify_product()
+    reste le seul endroit qui décide du stock et du prix affiché.
+    """
+    try:
+        return f"{int(brut) / 100:.2f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_product_shopify(handle, src, session):
+    """
+    Récupère UNE fiche produit Shopify via /products/<handle>.js.
+
+    Sert à surveiller un produit précis sans surveiller toute sa collection
+    (utile quand il n'appartient à aucune collection déjà suivie). C'est bien
+    l'endpoint .js qu'il faut : son cousin .json ne renvoie PAS le champ
+    "available" des variantes, donc ne permet pas de connaître le stock.
+    """
+    url = f"{src['base_url']}/products/{handle}.js"
+    fiche = dict(http_get(session, url).json())
+    fiche["variants"] = [dict(v, price=prix_centimes_en_decimal(v.get("price")))
+                         for v in (fiche.get("variants") or [])]
+    return normalize_shopify_product(fiche, src)
+
+
 def fetch_products_shopify(src, session):
     """
     Récupère les produits d'une collection Shopify via l'endpoint public
-    /collections/<handle>/products.json (JSON stable, léger pour la boutique).
+    /collections/<handle>/products.json (JSON stable, léger pour la boutique),
+    ou, si la source déclare 'products', les fiches produit listées.
     """
+    if src["products"]:
+        # Un handle injoignable fait échouer TOUTE la source, volontairement :
+        # run_source conserve alors l'état précédent intact. Renvoyer une liste
+        # partielle ferait disparaître le produit manquant de l'état, puis
+        # réapparaître en « nouveau produit » au passage suivant.
+        return [fetch_product_shopify(h, src, session) for h in src["products"]]
+
     handle = src["collection"]
     if not handle:
-        raise ValueError(f"Source '{src['key']}' : 'collection' manquant.")
+        raise ValueError(f"Source '{src['key']}' : ni 'collection' ni "
+                         f"'products' renseigné.")
 
     produits = []
     page = 1
@@ -627,7 +670,8 @@ def fetch_products(src, session):
     """Aiguillage vers la bonne plateforme. Renvoie (produits, méthode)."""
     plateforme = src["platform"]
     if plateforme == "shopify":
-        return fetch_products_shopify(src, session), "shopify"
+        methode = "shopify (fiches)" if src["products"] else "shopify"
+        return fetch_products_shopify(src, session), methode
     if plateforme == "emonsite":
         return fetch_products_emonsite(src, session), "html e-monsite"
     if plateforme == "woocommerce":
