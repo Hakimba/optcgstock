@@ -1795,40 +1795,19 @@
         "price": "50,00€",
         "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/playmat/one-piece-card-game-official-playmat-limited-edition-vol-4-zoro.html"
       },
+      "69fb19406347325927bd5d85": {
+        "in_stock": true,
+        "label": "30/10/2026",
+        "name": "Display - One Piece CG - EB-05 EN",
+        "price": "162,00€",
+        "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/op-11/display-one-piece-cg-eb-05.html"
+      },
       "6a20785b10cd8da8120689a0": {
         "in_stock": false,
         "label": "20/11/2026",
         "name": "Boite de 24 Boosters - One Piece CG - OP18 - EN",
-        "price": "142,00€",
+        "price": "152,00€",
         "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/op-11/boite-de-24-boosters-one-piece-cg-op18-en.html"
-      },
-      "6a207985dc245571e35c0cdc": {
-        "in_stock": false,
-        "label": "20/11/2026",
-        "name": "Boite de 24 Boosters - One Piece CG - OP18 - FR",
-        "price": "152,00€",
-        "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/display-one-piece-fr/boite-de-24-boosters-one-piece-cg-op18-fr.html"
-      },
-      "6a5b3292dd2296e5bcd07f63": {
-        "in_stock": false,
-        "label": "début 2027 ?",
-        "name": "Boite de 24 Boosters - One Piece CG - OP19 - EN",
-        "price": "142,00€",
-        "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/op-11/boite-de-24-boosters-one-piece-cg-op19-en.html"
-      },
-      "6a5b35728e19e51807f4bb8d": {
-        "in_stock": false,
-        "label": "29/01/2027",
-        "name": "Boite de 24 Boosters - One Piece CG - EB06 - FR",
-        "price": "170,00€",
-        "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/display-one-piece-fr/boite-de-24-boosters-one-piece-cg-eb06-fr.html"
-      },
-      "6a5b35dad8002f0f67857827": {
-        "in_stock": false,
-        "label": "29/01/2027",
-        "name": "Boite de 24 Boosters - One Piece CG - EB06 - EN",
-        "price": "152,00€",
-        "url": "https://www.mystic-ambre.fr/boutique/pre-commande/one-piece-pre-co/op-11/boite-de-24-boosters-one-piece-cg-eb06-en.html"
       }
     }
   },
